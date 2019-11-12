@@ -330,22 +330,26 @@ class NandIO:
         if not self.Identified:
             return
 
-        # check ONFI support (Read ID Definition)
+        # check ONFI support (Read ID with address 0x20)
         self.sendCmd(self.NAND_CMD_READID)
         self.sendAddr(0x20, 1)
         onfitmp = self.readFlashData(4)
 
-        onfi = (onfitmp == [0x4F, 0x4E, 0x46, 0x49]) # 'ONFI' in ASCII
+        onfi = (onfitmp == bytearray("ONFI", "ASCII"))
+        if not onfi:
+            print("WARNING: ONFI 'Read ID' failed - flash device does not support ONFI.")
 
         if onfi:
-            # Read Parameter Page Definition
+            # Read Parameter Page
             # ONFI compatible devices should return the parameter page
             # starting with a fixed byte sequence of 'ONFI' in ASCII
             self.sendCmd(self.NAND_CMD_ONFI)
             self.sendAddr(0, 1)
             self.WaitReady()
-            onfi_data = self.readFlashData(0x100)
-            onfi = onfi_data[0:4] == [0x4F, 0x4E, 0x46, 0x49]
+            onfi_data = self.readFlashData(4)
+            onfi = (onfi_data == bytearray("ONFI", "ASCII"))
+            if not onfi:
+                print("WARNING: ONFI 'Read Parameter Page' failed.")
 
         if flash_identifiers[0] == 0x98:
             self.Manufacturer = 'Toshiba'
