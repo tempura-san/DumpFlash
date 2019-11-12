@@ -1,7 +1,8 @@
-DumpUBoot.pyc
-ECC.pyc
-FlashDevice.pyc
-FlashFile.pyc
-FlashUtil.pyc
+/venv
+*.pyc
 *.bak
 *.bin
+*.dump
+
+/.vscode
+
