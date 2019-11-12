@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 """TODO"""
 # pylint: disable=invalid-name
 # pylint: disable=line-too-long
