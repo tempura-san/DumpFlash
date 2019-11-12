@@ -10,10 +10,20 @@ from pyftdi import ftdi
 import ECC
 
 class NandIO:
-    ADR_CE = 0x10
-    ADR_WP = 0x20
-    ADR_CL = 0x40
-    ADR_AL = 0x80
+    # FT232H : NAND flash connections:
+    # - ADBUS0..7 : I/O0..7    [LOW_BITS]
+    # - ACBUS0..6 : see below  [HIGH_BITS]
+    # Note: as the FTDI RS232-HS is used in MPSSE mode, on Linux you need to
+    #       blacklist the ftdio_sio module to keep it from interfering.
+    ACBUS_RB = 0    # READY - /BUSY
+    ACBUS_RE = 1    # /READ ENABLE
+    ACBUS_CE = 2    # /CHIP ENABLE
+    ACBUS_CL = 3    # COMMAND LATCH ENABLE
+    ACBUS_AL = 4    # ADDRESS LATCH ENABLE
+    ACBUS_WE = 5    # /WRITE ENABLE
+    ACBUS_WP = 6    # /WRITE PROTECT
+    ACBUS_IDLE = (1 << ACBUS_WE)|(1 << ACBUS_RE)
+    ACBUS_PDIR = (2**(ACBUS_WP + 1) - 1) & ~(1 << ACBUS_RB) # (=126) all bits set are outputs
 
     NAND_CMD_READ0 = 0
     NAND_CMD_READ1 = 1
@@ -141,12 +151,13 @@ class NandIO:
         self.UseAnsi = False
         self.Ftdi = ftdi.Ftdi()
         try:
-            self.Ftdi.open(0x0403, 0x6010, interface=1)
+            # FT232H
+            self.Ftdi.open(0x0403, 0x6014, interface=1)
         except:
             traceback.print_exc(file=sys.stdout)
             return
 
-        self.Ftdi.set_bitmode(0, self.Ftdi.BITMODE_MCU)
+        self.Ftdi.set_bitmode(0, self.Ftdi.BITMODE_MPSSE)
 
         if self.Slow:
             # Clock FTDI chip at 12MHz instead of 60MHz
@@ -156,7 +167,11 @@ class NandIO:
 
         self.Ftdi.set_latency_timer(self.Ftdi.LATENCY_MIN)
         self.Ftdi.purge_buffers()
-        self.Ftdi.write_data(Array('B', [ftdi.Ftdi.SET_BITS_HIGH, 0x0, 0x1]))
+        # all bits LOW means:
+        #  /CHIP ENABLEd
+        #  /WRITE PROTECT disabled
+        self.Ftdi.write_data(Array('B', [ftdi.Ftdi.SET_BITS_LOW, 0x0, 0x0]))
+        self.Ftdi.write_data(Array('B', [ftdi.Ftdi.SET_BITS_HIGH, NandIO.ACBUS_IDLE, NandIO.ACBUS_PDIR]))
         self.WaitReady()
         self.GetID()
 
@@ -169,57 +184,93 @@ class NandIO:
         self.UseAnsi = use_ansi
 
     def WaitReady(self):
-        """TODO"""
+        """
+        Wait until the NAND chip is ready, signalled by pulling R/B high.
+
+        An exception is raised if the FTDI chip does not return any data.
+        """
         while 1:
             self.Ftdi.write_data(Array('B', [ftdi.Ftdi.GET_BITS_HIGH]))
-            data = self.Ftdi.read_data_bytes(1)
+            data = self.Ftdi.read_data_bytes(1, 100)
             if not data:
                 raise Exception('FTDI device Not ready. Try restarting it.')
-            if data[0]&2 == 0x2:
-                return
+            if data[0] & (1 << NandIO.ACBUS_RB):
+                return # NAND is READY
             if self.Debug > 0:
-                print('Not Ready', data)
+                print('NAND is BUSY', data)
         return
 
     def nandRead(self, cl, al, count):
-        """TODO"""
+        """
+        Low-level read a number of bytes from the NAND chip.
+
+        CLE and ALE lines can be controlled via cl and al, count equals the number
+        of bytes to be read.
+        """
         cmds = []
+        data = bytearray(count)
         cmd_type = 0
-        if cl == 1:
-            cmd_type |= self.ADR_CL
-        if al == 1:
-            cmd_type |= self.ADR_AL
+        if cl: # COMMAND LATCH ENABLE
+            cmd_type |= (1 << NandIO.ACBUS_CL)
+        if al: # ADDRESS LATCH ENABLE
+            cmd_type |= (1 << NandIO.ACBUS_AL)
 
-        cmds += [ftdi.Ftdi.READ_EXTENDED, cmd_type, 0]
+        cmds += [ftdi.Ftdi.SET_BITS_LOW, 0x00, 0x00] # enable inputs
+        cmds += [ftdi.Ftdi.SET_BITS_HIGH, cmd_type|NandIO.ACBUS_IDLE, NandIO.ACBUS_PDIR]
 
-        for _ in range(1, count, 1):
-            cmds += [ftdi.Ftdi.READ_SHORT, 0]
+        for i in range(count):
+            cmds += [ftdi.Ftdi.SET_BITS_HIGH, (cmd_type|NandIO.ACBUS_IDLE)&~(1 << NandIO.ACBUS_RE), NandIO.ACBUS_PDIR]
+            cmds += [ftdi.Ftdi.GET_BITS_LOW]
+            self.Ftdi.write_data(Array('B', cmds))
+            _d = self.Ftdi.read_data_bytes(1, 100)
+            if _d is None:
+                raise Exception("unexpected short read(1)")
+            data[i] = _d[0]
+            self.Ftdi.write_data(Array('B', [ftdi.Ftdi.SET_BITS_HIGH, cmd_type|NandIO.ACBUS_IDLE, NandIO.ACBUS_PDIR]))
+            cmds = []
 
-        cmds.append(ftdi.Ftdi.SEND_IMMEDIATE)
+        # if self.getSlow():
+        #     data = self.Ftdi.read_data_bytes(count*2)
+        #     data = data[0:-1:2]
+        # else:
+        #     data = self.Ftdi.read_data_bytes(count)
+
+        cmds += [ftdi.Ftdi.SET_BITS_LOW, 0x00, 0xFF]
+        cmds += [ftdi.Ftdi.SET_BITS_HIGH, NandIO.ACBUS_IDLE, NandIO.ACBUS_PDIR]
+
         self.Ftdi.write_data(Array('B', cmds))
-        if self.getSlow():
-            data = self.Ftdi.read_data_bytes(count*2)
-            data = data[0:-1:2]
-        else:
-            data = self.Ftdi.read_data_bytes(count)
-        return data.tobytes()
+        #print("nandRead (cl={}, al={}): {}".format(cl, al, ", ".join(["{:02X}h".format(x) for x in data])))
+        return data
 
     def nandWrite(self, cl, al, data):
-        """TODO"""
-        cmds = []
-        cmd_type = 0
-        if cl == 1:
-            cmd_type |= self.ADR_CL
-        if al == 1:
-            cmd_type |= self.ADR_AL
-        if not self.WriteProtect:
-            cmd_type |= self.ADR_WP
+        """
+        Low-level write a number of bytes to the NAND chip.
 
-        cmds += [ftdi.Ftdi.WRITE_EXTENDED, cmd_type, 0, ord(data[0])]
-        for i in range(1, len(data), 1):
-            #if i == 256:
-            #    cmds+=[Ftdi.WRITE_SHORT, 0, ord(data[i])]
-            cmds += [ftdi.Ftdi.WRITE_SHORT, 0, ord(data[i])]
+        CLE and ALE lines can be controlled via cl and al, data contains a list of data
+        to be written.
+        WP state is based on the 'WriteProtect' member variable.
+        """
+        cmds = []
+        cmd_type = 0x00
+        if cl: # COMMAND LATCH ENABLE
+            cmd_type |= (1 << NandIO.ACBUS_CL)
+        if al: # ADDRESS LATCH ENABLE
+            cmd_type |= (1 << NandIO.ACBUS_AL)
+        if not self.WriteProtect: # /WRITE PROTECT
+            cmd_type |= (1 << NandIO.ACBUS_WP)
+
+        cmds += [ftdi.Ftdi.SET_BITS_LOW, 0x00, 0xFF]
+        cmds += [ftdi.Ftdi.SET_BITS_HIGH, cmd_type|NandIO.ACBUS_IDLE, NandIO.ACBUS_PDIR]
+
+        for d in data:
+            cmds += [ftdi.Ftdi.SET_BITS_HIGH, (cmd_type|NandIO.ACBUS_IDLE)&~(1 << NandIO.ACBUS_WE), NandIO.ACBUS_PDIR]
+            cmds += [ftdi.Ftdi.SET_BITS_LOW, ord(d), 0xFF]
+            cmds += [ftdi.Ftdi.SET_BITS_HIGH, cmd_type|NandIO.ACBUS_IDLE, NandIO.ACBUS_PDIR]
+
+        cmds += [ftdi.Ftdi.SET_BITS_LOW, 0x00, 0xFF]
+        cmds += [ftdi.Ftdi.SET_BITS_HIGH, NandIO.ACBUS_IDLE, NandIO.ACBUS_PDIR]
+
+        #print("nandWrite(cl={}, al={}): {}".format(cl, al, ", ".join(["{:02X}h".format(ord(x)) for x in data])))
         self.Ftdi.write_data(Array('B', cmds))
 
     def sendCmd(self, cmd):
@@ -270,7 +321,8 @@ class NandIO:
         self.AddrCycles = 0
 
         for device_description in self.DeviceDescriptions:
-            if device_description[1] == flash_identifiers[0]:
+            # look up 'Device Code' (byte 1) to identify layout
+            if device_description[1] == flash_identifiers[1]:
                 (self.Name, self.ID, self.PageSize, self.ChipSizeMB, self.EraseSize, self.Options, self.AddrCycles) = device_description
                 self.Identified = True
                 break
@@ -278,14 +330,17 @@ class NandIO:
         if not self.Identified:
             return
 
-        #Check ONFI
+        # check ONFI support (Read ID Definition)
         self.sendCmd(self.NAND_CMD_READID)
         self.sendAddr(0x20, 1)
         onfitmp = self.readFlashData(4)
 
-        onfi = (onfitmp == [0x4F, 0x4E, 0x46, 0x49])
+        onfi = (onfitmp == [0x4F, 0x4E, 0x46, 0x49]) # 'ONFI' in ASCII
 
         if onfi:
+            # Read Parameter Page Definition
+            # ONFI compatible devices should return the parameter page
+            # starting with a fixed byte sequence of 'ONFI' in ASCII
             self.sendCmd(self.NAND_CMD_ONFI)
             self.sendAddr(0, 1)
             self.WaitReady()
@@ -398,21 +453,21 @@ class NandIO:
 
     def DumpInfo(self):
         """TODO"""
-        print('Full ID:\t', self.IDString)
-        print('ID Length:\t', self.IDLength)
-        print('Name:\t\t', self.Name)
-        print('ID:\t\t0x%x' % self.ID)
-        print('Page size:\t 0x{0:x}({0:d})'.format(self.PageSize))
-        print('OOB size:\t0x{0:x} ({0:d})'.format(self.OOBSize))
-        print('Page count:\t0x%x' % self.PageCount)
-        print('Size:\t\t0x%x' % self.ChipSizeMB)
-        print('Erase size:\t0x%x' % self.EraseSize)
-        print('Block count:\t', self.BlockCount)
-        print('Options:\t', self.Options)
-        print('Address cycle:\t', self.AddrCycles)
-        print('Bits per Cell:\t', self.BitsPerCell)
-        print('Manufacturer:\t', self.Manufacturer)
-        print('')
+        print('Full ID:          {}'.format(self.IDString))
+        print('ID Length:        {}'.format(self.IDLength))
+        print('Name:             {}'.format(self.Name))
+        print('Device ID:        0x{:x}'.format(self.ID))
+        print('Page size:        0x{0:x}({0:d})'.format(self.PageSize))
+        print('OOB size:         0x{0:x} ({0:d})'.format(self.OOBSize))
+        print('Page count:       0x{:x}'.format(self.PageCount))
+        print('Size:             0x{:x}'.format(self.ChipSizeMB))
+        print('Erase size:       0x{:x}'.format(self.EraseSize))
+        print('Block count:      {}'.format(self.BlockCount))
+        print('Options:          {}'.format(self.Options))
+        print('Address cycle(s): {}'.format(self.AddrCycles))
+        print('Bits per Cell:    {}'.format(self.BitsPerCell))
+        print('Manufacturer:     {}'.format(self.Manufacturer))
+        print()
 
     def CheckBadBlocks(self):
         """TODO"""
