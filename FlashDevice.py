@@ -189,11 +189,11 @@ class NandIO:
 
         An exception is raised if the FTDI chip does not return any data.
         """
-        while 1:
+        while True:
             self.Ftdi.write_data(Array('B', [ftdi.Ftdi.GET_BITS_HIGH]))
             data = self.Ftdi.read_data_bytes(1, 100)
             if not data:
-                raise Exception('FTDI device Not ready. Try restarting it.')
+                raise Exception('FTDI device not ready. Try restarting it.')
             if data[0] & (1 << NandIO.ACBUS_RB):
                 return # NAND is READY
             if self.Debug > 0:
@@ -217,19 +217,20 @@ class NandIO:
 
         cmds += [ftdi.Ftdi.SET_BITS_LOW, 0x00, 0x00] # enable inputs
         cmds += [ftdi.Ftdi.SET_BITS_HIGH, cmd_type|NandIO.ACBUS_IDLE, NandIO.ACBUS_PDIR]
+        self.Ftdi.write_data(Array('B', cmds))
 
         while count > 0:
             # the FT232H has internal buffers of 1024 bytes
             # use half of them to get a decent read rate of about 35kB/s
-            # going to high will result in a timeout of the device
+            # going too high will result in a timeout of the device
             readsize = min(count, 512)
-            for _ in range(readsize):
-                cmds += [ftdi.Ftdi.SET_BITS_HIGH, (cmd_type|NandIO.ACBUS_IDLE)&~(1 << NandIO.ACBUS_RE), NandIO.ACBUS_PDIR]
-                cmds += [ftdi.Ftdi.GET_BITS_LOW]
-                cmds += [ftdi.Ftdi.SET_BITS_HIGH, cmd_type|NandIO.ACBUS_IDLE, NandIO.ACBUS_PDIR]
-            self.Ftdi.write_data(Array('B', cmds))
 
+            self.Ftdi.write_data(Array('B',
+                [ftdi.Ftdi.SET_BITS_HIGH, (cmd_type|NandIO.ACBUS_IDLE)&~(1 << NandIO.ACBUS_RE), NandIO.ACBUS_PDIR,
+                 ftdi.Ftdi.GET_BITS_LOW,
+                 ftdi.Ftdi.SET_BITS_HIGH, cmd_type|NandIO.ACBUS_IDLE, NandIO.ACBUS_PDIR] * readsize))
             _d = self.Ftdi.read_data_bytes(readsize, 100)
+
             if _d is None:
                 raise Exception("failed to read data from flash")
             elif len(_d) != readsize:
@@ -247,9 +248,9 @@ class NandIO:
 
         cmds += [ftdi.Ftdi.SET_BITS_LOW, 0x00, 0xFF]
         cmds += [ftdi.Ftdi.SET_BITS_HIGH, NandIO.ACBUS_IDLE, NandIO.ACBUS_PDIR]
-
         self.Ftdi.write_data(Array('B', cmds))
         #print("nandRead (cl={}, al={}): {}".format(cl, al, ", ".join(["{:02X}h".format(x) for x in data])))
+
         return data
 
     def nandWrite(self, cl, al, data):
@@ -343,22 +344,17 @@ class NandIO:
         # check ONFI support (Read ID with address 0x20)
         self.sendCmd(self.NAND_CMD_READID)
         self.sendAddr(0x20, 1)
-        onfitmp = self.readFlashData(4)
-
-        onfi = (onfitmp == bytearray("ONFI", "ASCII"))
-        if not onfi:
+        onfi = (self.readFlashData(4) == bytearray("ONFI", "ASCII")) or \
             print("WARNING: ONFI 'Read ID' failed - flash device does not support ONFI.")
 
         if onfi:
             # Read Parameter Page
-            # ONFI compatible devices should return the parameter page
+            # ONFI compliant devices should return the parameter page
             # starting with a fixed byte sequence of 'ONFI' in ASCII
             self.sendCmd(self.NAND_CMD_ONFI)
-            self.sendAddr(0, 1)
+            self.sendAddr(0x00, 1)
             self.WaitReady()
-            onfi_data = self.readFlashData(4)
-            onfi = (onfi_data == bytearray("ONFI", "ASCII"))
-            if not onfi:
+            onfi = (self.readFlashData(4) == bytearray("ONFI", "ASCII")) or \
                 print("WARNING: ONFI 'Read Parameter Page' failed.")
 
         if flash_identifiers[0] == 0x98:
@@ -457,7 +453,6 @@ class NandIO:
         self.BlockCount = int((self.ChipSizeMB*1024*1024)/self.BlockSize)
         self.PagePerBlock = int(self.PageCount/self.BlockCount)
         self.RawBlockSize = self.PagePerBlock*(self.PageSize + self.OOBSize)
-        return True
 
     def GetBitsPerCell(self, cellinfo):
         """TODO"""
