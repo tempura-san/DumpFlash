@@ -208,7 +208,7 @@ class NandIO:
         of bytes to be read.
         """
         cmds = []
-        data = bytearray(count)
+        data = bytearray()
         cmd_type = 0
         if cl: # COMMAND LATCH ENABLE
             cmd_type |= (1 << NandIO.ACBUS_CL)
@@ -218,15 +218,24 @@ class NandIO:
         cmds += [ftdi.Ftdi.SET_BITS_LOW, 0x00, 0x00] # enable inputs
         cmds += [ftdi.Ftdi.SET_BITS_HIGH, cmd_type|NandIO.ACBUS_IDLE, NandIO.ACBUS_PDIR]
 
-        for i in range(count):
-            cmds += [ftdi.Ftdi.SET_BITS_HIGH, (cmd_type|NandIO.ACBUS_IDLE)&~(1 << NandIO.ACBUS_RE), NandIO.ACBUS_PDIR]
-            cmds += [ftdi.Ftdi.GET_BITS_LOW]
+        dsize = count
+        while dsize > 0:
+            # the FT232H has internal buffers of 1024 bytes
+            # use half of them to get a decent read rate of about 35kB/s
+            # going to high will result in a timeout of the device
+            readsize = min(dsize, 512)
+            for _ in range(readsize):
+                cmds += [ftdi.Ftdi.SET_BITS_HIGH, (cmd_type|NandIO.ACBUS_IDLE)&~(1 << NandIO.ACBUS_RE), NandIO.ACBUS_PDIR]
+                cmds += [ftdi.Ftdi.GET_BITS_LOW]
+                cmds += [ftdi.Ftdi.SET_BITS_HIGH, cmd_type|NandIO.ACBUS_IDLE, NandIO.ACBUS_PDIR]
             self.Ftdi.write_data(Array('B', cmds))
-            _d = self.Ftdi.read_data_bytes(1, 100)
+
+            _d = self.Ftdi.read_data_bytes(readsize, 100)
             if _d is None:
-                raise Exception("unexpected short read(1)")
-            data[i] = _d[0]
-            self.Ftdi.write_data(Array('B', [ftdi.Ftdi.SET_BITS_HIGH, cmd_type|NandIO.ACBUS_IDLE, NandIO.ACBUS_PDIR]))
+                raise Exception("unexpected short read({})".format(count))
+            data += _d
+
+            dsize -= readsize
             cmds = []
 
         # if self.getSlow():
