@@ -218,12 +218,11 @@ class NandIO:
         cmds += [ftdi.Ftdi.SET_BITS_LOW, 0x00, 0x00] # enable inputs
         cmds += [ftdi.Ftdi.SET_BITS_HIGH, cmd_type|NandIO.ACBUS_IDLE, NandIO.ACBUS_PDIR]
 
-        dsize = count
-        while dsize > 0:
+        while count > 0:
             # the FT232H has internal buffers of 1024 bytes
             # use half of them to get a decent read rate of about 35kB/s
             # going to high will result in a timeout of the device
-            readsize = min(dsize, 512)
+            readsize = min(count, 512)
             for _ in range(readsize):
                 cmds += [ftdi.Ftdi.SET_BITS_HIGH, (cmd_type|NandIO.ACBUS_IDLE)&~(1 << NandIO.ACBUS_RE), NandIO.ACBUS_PDIR]
                 cmds += [ftdi.Ftdi.GET_BITS_LOW]
@@ -232,10 +231,12 @@ class NandIO:
 
             _d = self.Ftdi.read_data_bytes(readsize, 100)
             if _d is None:
-                raise Exception("unexpected short read({})".format(count))
+                raise Exception("failed to read data from flash")
+            elif len(_d) != readsize:
+                raise Exception("short read data from flash ({} of {})".format(len(_d), readsize))
             data += _d
 
-            dsize -= readsize
+            count -= readsize
             cmds = []
 
         # if self.getSlow():
