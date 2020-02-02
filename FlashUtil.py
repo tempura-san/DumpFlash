@@ -57,12 +57,10 @@ class FlashUtil:
                 current = time.time()
                 if current-start > self.DumpProgressInterval:
                     start = current
-                    progress = (page-start_page) * 100 / (end_page-start_page)
+                    progress = (page - start_page) * 100 / (end_page - start_page)
+                    sys.stdout.write('Checking ECC %d%% (Page: %3d/%3d Block: %3d/%3d)\n' % (progress, page, end_page, block, end_block))
                     if self.UseAnsi:
-                        fmt_str = 'Checking ECC %d%% (Page: %3d/%3d Block: %3d/%3d)\n\033[A'
-                    else:
-                        fmt_str = 'Checking ECC %d%% (Page: %3d/%3d Block: %3d/%3d)\n'
-                    sys.stdout.write(fmt_str % (progress, page, end_page, block, end_block))
+                        sys.stdout.write('\033[A')
 
             #if self.CheckBadBlock(block)==self.BAD_BLOCK:
             #    print 'Bad Block: %d' % block
