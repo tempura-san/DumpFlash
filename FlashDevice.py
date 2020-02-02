@@ -172,6 +172,7 @@ class NandIO:
         #  /WRITE PROTECT disabled
         self.Ftdi.write_data(Array('B', [ftdi.Ftdi.SET_BITS_LOW, 0x0, 0x0]))
         self.Ftdi.write_data(Array('B', [ftdi.Ftdi.SET_BITS_HIGH, NandIO.ACBUS_IDLE, NandIO.ACBUS_PDIR]))
+        self.Reset()
         self.WaitReady()
         self.GetID()
 
@@ -182,6 +183,15 @@ class NandIO:
     def SetUseAnsi(self, use_ansi):
         """TODO"""
         self.UseAnsi = use_ansi
+
+    def Reset(self):
+        """
+        Issue a RESET command to the flash.
+
+        This should be the first thing to do before attempting to
+        communicate with the chip.
+        """
+        self.sendCmd(self.NAND_CMD_RESET)
 
     def WaitReady(self):
         """
