@@ -326,6 +326,10 @@ class NandIO:
         """TODO"""
         return self.Slow
 
+    def GetPageOffset(self, pageno):
+        """TODO"""
+        return pageno*self.PageSize
+
     def GetID(self):
         """TODO"""
         self.sendCmd(self.NAND_CMD_READID)

@@ -54,7 +54,7 @@ class ECC:
         p4_ = 0
 
         for i in range(0, len(body), 1):
-            ch = ord(body[i])
+            ch = body[i]
             bit0 = ch & 0x1
             bit1 = (ch >> 1) & 0x1
             bit2 = (ch >> 2) & 0x1

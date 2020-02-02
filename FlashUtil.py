@@ -76,9 +76,9 @@ class FlashUtil:
 
             count += 1
             body = data[0:self.io.PageSize]
-            oob_ecc0 = ord(data[self.io.PageSize])
-            oob_ecc1 = ord(data[self.io.PageSize+1])
-            oob_ecc2 = ord(data[self.io.PageSize+2])
+            oob_ecc0 = data[self.io.PageSize]
+            oob_ecc1 = data[self.io.PageSize+1]
+            oob_ecc2 = data[self.io.PageSize+2]
 
             if (oob_ecc0 == 0xff and oob_ecc1 == 0xff and oob_ecc2 == 0xff) or (oob_ecc0 == 0x00 and oob_ecc1 == 0x00 and oob_ecc2 == 0x00):
                 continue
