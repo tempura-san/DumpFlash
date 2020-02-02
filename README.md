@@ -9,13 +9,13 @@ This is a fork of <https://github.com/ohjeongwook/DumpFlash> that tries to be li
 This chip supports only one channel with two busses (`AC` and `AD`). Also no 'Host Emulation' is available, so DumpFlash needs to be configured for using the MPSSE interface for the FT232H. Make the connections as shown below.
 
 * `ADBUS0..ADBUS7` to `I/O0..I/O7`
-* `ACBUS2` to `/RE`
-* `ACBUS3` to `/WE`
-* `ACBUS5` to `/WP`
-* `ACBUS6` to `CLE`
-* `ACBUS8` to `ALE`
-* `ACBUS9` to `/CE`
 * `ACBUS0` to `R/B`
+* `ACBUS1` to `/RE`
+* `ACBUS2` to `/CE`
+* `ACBUS3` to `CLE`
+* `ACBUS4` to `ALE`
+* `ACBUS5` to `/WE`
+* `ACBUS6` to `/WP`
 
 In the DumpFlash code the alternate access method needs to be implemented in `FlashDevice.py`, in the `nandRead()` and `nandWrite()` functions.
 
